@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: tunnel-server
+
+logging:
+  level:
+    com.tunnel.service: DEBUG
