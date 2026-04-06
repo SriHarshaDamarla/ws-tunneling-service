@@ -1,5 +1,6 @@
 package com.tunnel.service.config;
 
+import com.tunnel.service.handler.ClientWsHandler;
 import com.tunnel.service.handler.TunnelWebSocketHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,9 +16,13 @@ import java.util.Map;
 public class WebSocketConfig {
 
     @Bean
-    public HandlerMapping webSocketMapping(TunnelWebSocketHandler handler) {
+    public HandlerMapping webSocketMapping(
+            TunnelWebSocketHandler agentHandler,
+            ClientWsHandler clientWsHandler
+            ) {
         Map<String, WebSocketHandler> map = new HashMap<>();
-        map.put("/agent", handler);
+        map.put("/agent", agentHandler);
+        map.put("/ws/tunnel/**", clientWsHandler);
 
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
         mapping.setUrlMap(map);
