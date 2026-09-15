@@ -6,6 +6,8 @@ import com.tunnel.service.model.Forward;
 import com.tunnel.service.registry.AgentRegistry;
 import com.tunnel.service.tcp.TcpForwardService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -42,5 +44,10 @@ public class ForwardController {
     @DeleteMapping("/forwards/{id}")
     public void deleteForward(@PathVariable String id) {
         service.deleteForward(id);
+    }
+
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<String> handleIOException(IOException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
     }
 }
