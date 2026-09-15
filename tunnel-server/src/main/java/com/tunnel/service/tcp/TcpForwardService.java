@@ -18,11 +18,7 @@ import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
-import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 @Component
 @Slf4j
@@ -38,6 +34,16 @@ public class TcpForwardService {
         Thread.ofVirtual().start(() -> acceptLoop(9090, "raspberrypi.local", 22, "local-agent"));
     }
 
+    public void openTargetConnection(TcpOpen tcpOpen, String agentId) {
+        try {
+            Socket target = new Socket(tcpOpen.getHost(), tcpOpen.getPort());
+            connectionRegistry.register(tcpOpen.getConnId(), target);
+            Thread.ofVirtual().start(() -> pumpSocketToAgent(tcpOpen.getConnId(), target, agentId));
+        } catch (IOException e) {
+            sendTcpClose(tcpOpen.getConnId(), agentId);
+        }
+    }
+
     private void acceptLoop(int listenPort, String targetHost, int targetPort, String agentId) {
         try (ServerSocket server = new ServerSocket(listenPort)) {
             while (!Thread.currentThread().isInterrupted()) {
@@ -50,7 +56,7 @@ public class TcpForwardService {
                 open.setPort(targetPort);
                 WebSocketSession session = registry.get(agentId).orElseThrow();
                 session.sendMessage(new TextMessage(objectMapper.writeValueAsString(open)));
-                Thread.ofVirtual().start(() -> pumpClientToAgent(connId, client, agentId));
+                Thread.ofVirtual().start(() -> pumpSocketToAgent(connId, client, agentId));
             }
 
         } catch (IOException e) {
@@ -58,7 +64,7 @@ public class TcpForwardService {
         }
     }
 
-    private void pumpClientToAgent(int connId, Socket client, String agentId) {
+    private void pumpSocketToAgent(int connId, Socket client, String agentId) {
         try(InputStream in = client.getInputStream()) {
             byte[] buffer = new byte[1024];
             int len;

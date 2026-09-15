@@ -10,10 +10,12 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -28,6 +30,7 @@ public class AgentWsListener extends WebSocketListener {
     private final String agentId;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<Integer, Socket> sockets = new ConcurrentHashMap<>();
+    private final AtomicInteger agentConnIds = new AtomicInteger(0);
 
     @Override
     public void onOpen(@NotNull WebSocket webSocket, @NotNull Response response) {
@@ -35,6 +38,7 @@ public class AgentWsListener extends WebSocketListener {
 
         String json = objectMapper.writeValueAsString(new Register("register", agentId));
         webSocket.send(json);
+        Thread.ofVirtual().start(() -> acceptLoop(8443, "dummy", 443, webSocket));
     }
 
     @Override
@@ -47,7 +51,7 @@ public class AgentWsListener extends WebSocketListener {
                 try {
                     Socket socket = new Socket(open.getHost(), open.getPort());
                     sockets.put(connId, socket);
-                    Thread.ofVirtual().start(() -> pumpTargetToServer(connId, socket, webSocket));
+                    Thread.ofVirtual().start(() -> pumpSocketToServer(connId, socket, webSocket));
                 } catch (IOException e) {
                     sendTcpClose(connId, webSocket);
                 }
@@ -94,7 +98,7 @@ public class AgentWsListener extends WebSocketListener {
         t.printStackTrace();
     }
 
-    private void pumpTargetToServer(int connId, Socket socket, WebSocket webSocket) {
+    private void pumpSocketToServer(int connId, Socket socket, WebSocket webSocket) {
         try (InputStream in = socket.getInputStream()) {
             byte[] buffer = new byte[1024];
             int len;
@@ -126,6 +130,24 @@ public class AgentWsListener extends WebSocketListener {
             socket.close();
         } catch (IOException e) {
             System.out.println("Ignoring exception on closing socket");
+        }
+    }
+
+    private void acceptLoop(int listenPort, String targetHost,int targetPort, WebSocket webSocket) {
+        try (ServerSocket server = new ServerSocket(listenPort)) {
+            while (true) {
+                Socket client = server.accept();
+                int connId = -agentConnIds.incrementAndGet();
+                sockets.put(connId, client);
+                TcpOpen open = new TcpOpen();
+                open.setConnId(connId);
+                open.setHost(targetHost);
+                open.setPort(targetPort);
+                webSocket.send(objectMapper.writeValueAsString(open));
+                Thread.ofVirtual().start(() -> pumpSocketToServer(connId, client, webSocket));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 }

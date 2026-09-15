@@ -1,8 +1,10 @@
 package com.tunnel.service.handler;
 
 import com.tunnel.service.model.TcpClose;
+import com.tunnel.service.model.TcpOpen;
 import com.tunnel.service.registry.AgentRegistry;
 import com.tunnel.service.registry.ConnectionRegistry;
+import com.tunnel.service.tcp.TcpForwardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -26,6 +28,7 @@ public class AgentWsHandler extends AbstractWebSocketHandler {
 
     private final ObjectMapper objectMapper;
     private final AgentRegistry registry;
+    private final TcpForwardService tcpForwardService;
     private final ConnectionRegistry connectionRegistry;
 
     @Override
@@ -49,6 +52,11 @@ public class AgentWsHandler extends AbstractWebSocketHandler {
                 TcpClose close = objectMapper.readValue(message.getPayload(), TcpClose.class);
                 Socket client = connectionRegistry.remove(close.getConnId());
                 trySocketClose(client);
+            }
+            case "tcp-open" -> {
+                String agentId = (String) session.getAttributes().get("agentId");
+                TcpOpen open = objectMapper.readValue(message.getPayload(), TcpOpen.class);
+                tcpForwardService.openTargetConnection(open, agentId);
             }
             default -> log.warn("Unknown message type: {}", type);
         }
