@@ -144,7 +144,7 @@ public class TcpForwardService {
 
     private void applyEnabled(Forward f) throws IOException {
         if (f.getDirection() == Direction.SERVER_LISTEN) {
-            if (!listeners.containsKey(f.getAgentId())) {
+            if (!listeners.containsKey(f.getId())) {
                 openServerListen(f);
             }
         }
