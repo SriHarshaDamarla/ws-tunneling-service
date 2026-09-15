@@ -1,5 +1,7 @@
 package com.tunnel.service.tcp;
 
+import com.tunnel.service.dto.CreateForwardRequest;
+import com.tunnel.service.model.Direction;
 import com.tunnel.service.model.Forward;
 import com.tunnel.service.model.TcpClose;
 import com.tunnel.service.model.TcpOpen;
@@ -19,8 +21,10 @@ import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -105,6 +109,45 @@ public class TcpForwardService {
            trySocketClose(client);
         }
 
+    }
+
+    public Forward createForward(CreateForwardRequest request) throws IOException {
+        Forward f = new Forward();
+        f.setId(UUID.randomUUID().toString());
+        f.setDirection(request.direction());
+        f.setAgentId(request.agentId());
+        f.setListenPort(request.listenPort());
+        f.setTargetHost(request.targetHost());
+        f.setTargetPort(request.targetPort());
+        f.setEnabled(request.enabled());
+        forwards.put(f.getId(), f);
+        if (request.enabled()) applyEnabled(f);
+        return f;
+    }
+
+    public void setEnabled (String id, boolean enabled) throws IOException {
+        Forward f = forwards.get(id);
+        if (f == null) return;
+        f.setEnabled(enabled);
+        if (enabled) applyEnabled(f);
+        else closeServerListen(id);
+    }
+
+    public void deleteForward(String id) {
+        closeServerListen(id);
+        forwards.remove(id);
+    }
+
+    public Collection<Forward> getForwards() {
+        return forwards.values();
+    }
+
+    private void applyEnabled(Forward f) throws IOException {
+        if (f.getDirection() == Direction.SERVER_LISTEN) {
+            if (!listeners.containsKey(f.getAgentId())) {
+                openServerListen(f);
+            }
+        }
     }
 
     public void sendTcpClose(int connId, String agentId) {
