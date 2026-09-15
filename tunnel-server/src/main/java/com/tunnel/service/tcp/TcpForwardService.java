@@ -1,10 +1,10 @@
 package com.tunnel.service.tcp;
 
+import com.tunnel.service.model.Forward;
 import com.tunnel.service.model.TcpClose;
 import com.tunnel.service.model.TcpOpen;
 import com.tunnel.service.registry.AgentRegistry;
 import com.tunnel.service.registry.ConnectionRegistry;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -13,11 +13,15 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
@@ -27,12 +31,10 @@ public class TcpForwardService {
     private final AgentRegistry registry;
     private final ConnectionRegistry connectionRegistry;
     private final ObjectMapper objectMapper;
-    private final AtomicInteger connIds = new AtomicInteger(0);
 
-    @PostConstruct
-    public void start() {
-        Thread.ofVirtual().start(() -> acceptLoop(9090, "raspberrypi.local", 22, "local-agent"));
-    }
+    private final AtomicInteger connIds = new AtomicInteger(0);
+    private final Map<String, Forward> forwards = new ConcurrentHashMap<>();
+    private final Map<String, ServerSocket> listeners = new ConcurrentHashMap<>();
 
     public void openTargetConnection(TcpOpen tcpOpen, String agentId) {
         try {
@@ -44,23 +46,39 @@ public class TcpForwardService {
         }
     }
 
-    private void acceptLoop(int listenPort, String targetHost, int targetPort, String agentId) {
-        try (ServerSocket server = new ServerSocket(listenPort)) {
-            while (!Thread.currentThread().isInterrupted()) {
+    public void openServerListen(Forward f) throws IOException {
+        ServerSocket server = new ServerSocket(f.getListenPort());
+        listeners.put(f.getId(), server);
+        Thread.ofVirtual().start(() -> acceptLoop(f, server));
+    }
+
+    public void closeServerListen(String id) {
+        ServerSocket server = listeners.remove(id);
+        if (server != null) trySocketClose(server);
+    }
+
+    private void acceptLoop(Forward f, ServerSocket server) {
+        try {
+            while (true) {
                 Socket client = server.accept();
+                Optional<WebSocketSession> sessionOpt = registry.get(f.getAgentId());
+                if (sessionOpt.isEmpty()) {
+                    trySocketClose(client);
+                    continue;
+                }
+                WebSocketSession session = sessionOpt.get();
                 int connId = connIds.incrementAndGet();
                 connectionRegistry.register(connId, client);
                 TcpOpen open = new TcpOpen();
                 open.setConnId(connId);
-                open.setHost(targetHost);
-                open.setPort(targetPort);
-                WebSocketSession session = registry.get(agentId).orElseThrow();
+                open.setHost(f.getTargetHost());
+                open.setPort(f.getTargetPort());
                 session.sendMessage(new TextMessage(objectMapper.writeValueAsString(open)));
-                Thread.ofVirtual().start(() -> pumpSocketToAgent(connId, client, agentId));
+                Thread.ofVirtual().start(() -> pumpSocketToAgent(connId, client, f.getAgentId()));
             }
 
         } catch (IOException e) {
-            log.error("accept loop died on {}", listenPort, e);
+            log.info("accept loop on port {} stopped", f.getListenPort());
         }
     }
 
@@ -103,7 +121,7 @@ public class TcpForwardService {
         }
     }
 
-    private void trySocketClose(Socket socket) {
+    private void trySocketClose(Closeable socket) {
         try {
             socket.close();
         } catch (IOException e) {

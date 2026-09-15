@@ -95,6 +95,7 @@ public class AgentWsHandler extends AbstractWebSocketHandler {
     }
 
     private void trySocketClose(Socket socket) {
+        if (socket == null) return;
         try {
             socket.close();
         } catch (IOException e) {

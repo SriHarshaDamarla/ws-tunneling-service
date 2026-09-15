@@ -38,7 +38,7 @@ public class AgentWsListener extends WebSocketListener {
 
         String json = objectMapper.writeValueAsString(new Register("register", agentId));
         webSocket.send(json);
-        Thread.ofVirtual().start(() -> acceptLoop(8443, "dummy", 443, webSocket));
+        Thread.ofVirtual().start(() -> acceptLoop(8443, "example.com", 443, webSocket));
     }
 
     @Override

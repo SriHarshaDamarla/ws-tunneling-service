@@ -1,6 +1,8 @@
 spring:
   application:
     name: tunnel-server
+server:
+  port: 8081
 
 logging:
   level:
