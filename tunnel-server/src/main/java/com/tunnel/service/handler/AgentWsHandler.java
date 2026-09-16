@@ -46,6 +46,7 @@ public class AgentWsHandler extends AbstractWebSocketHandler {
                 WebSocketSession concurrent = new ConcurrentWebSocketSessionDecorator(session, 10_000, 512 * 1024);
                 registry.register(agentId, concurrent);
                 session.getAttributes().put("agentId", agentId);
+                tcpForwardService.onAgentRegistered(agentId);
                 log.info("Registered agent: {}", agentId);
             }
             case "tcp-close" -> {

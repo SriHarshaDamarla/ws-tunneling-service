@@ -1,10 +1,7 @@
 package com.tunnel.service.tcp;
 
 import com.tunnel.service.dto.CreateForwardRequest;
-import com.tunnel.service.model.Direction;
-import com.tunnel.service.model.Forward;
-import com.tunnel.service.model.TcpClose;
-import com.tunnel.service.model.TcpOpen;
+import com.tunnel.service.model.*;
 import com.tunnel.service.registry.AgentRegistry;
 import com.tunnel.service.registry.ConnectionRegistry;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +56,12 @@ public class TcpForwardService {
     public void closeServerListen(String id) {
         ServerSocket server = listeners.remove(id);
         if (server != null) trySocketClose(server);
+    }
+
+    public void onAgentRegistered(String agentId) {
+        forwards.values().stream()
+                .filter(f -> f.getDirection() == Direction.AGENT_LISTEN && f.isEnabled() && agentId.equals(f.getAgentId()))
+                .forEach(this::sendOpenListener);
     }
 
     private void acceptLoop(Forward f, ServerSocket server) {
@@ -130,11 +133,13 @@ public class TcpForwardService {
         if (f == null) return;
         f.setEnabled(enabled);
         if (enabled) applyEnabled(f);
-        else closeServerListen(id);
+        else applyDisabled(f);
     }
 
     public void deleteForward(String id) {
-        closeServerListen(id);
+        Forward f = forwards.get(id);
+        if (f == null) return;
+        applyDisabled(f);
         forwards.remove(id);
     }
 
@@ -147,7 +152,14 @@ public class TcpForwardService {
             if (!listeners.containsKey(f.getId())) {
                 openServerListen(f);
             }
+        } else {
+            sendOpenListener(f);
         }
+    }
+
+    private void applyDisabled(Forward f) {
+        if (f.getDirection() == Direction.SERVER_LISTEN) closeServerListen(f.getId());
+        else sendCloseListener(f);
     }
 
     public void sendTcpClose(int connId, String agentId) {
@@ -161,6 +173,33 @@ public class TcpForwardService {
 
             }
 
+        }
+    }
+
+    private void sendOpenListener(Forward f) {
+        registry.get(f.getAgentId()).ifPresent(s -> {
+            OpenListener ol = new OpenListener();
+            ol.setForwardId(f.getId());
+            ol.setListenPort(f.getListenPort());
+            ol.setTargetHost(f.getTargetHost());
+            ol.setTargetPort(f.getTargetPort());
+            trySend(s, ol);
+        });
+    }
+
+    private void sendCloseListener(Forward f) {
+        registry.get(f.getAgentId()).ifPresent(s -> {
+            CloseListener cl = new CloseListener();
+            cl.setForwardId(f.getId());
+            trySend(s, cl);
+        });
+    }
+
+    private void trySend(WebSocketSession webSocket, Object message) {
+        try {
+            webSocket.sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
+        } catch (IOException e) {
+            log.info("ignored websocket send message: {}", e.getMessage());
         }
     }
 

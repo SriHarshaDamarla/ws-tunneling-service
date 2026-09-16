@@ -1,5 +1,6 @@
 package com.tunnel.agent.listener;
 
+import com.tunnel.agent.model.*;
 import lombok.RequiredArgsConstructor;
 import okhttp3.Response;
 import okhttp3.WebSocket;
@@ -8,6 +9,7 @@ import okio.ByteString;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
@@ -20,16 +22,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import com.tunnel.agent.model.Register;
-import com.tunnel.agent.model.TcpClose;
-import com.tunnel.agent.model.TcpOpen;
-
 @RequiredArgsConstructor
 public class AgentWsListener extends WebSocketListener {
 
     private final String agentId;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<Integer, Socket> sockets = new ConcurrentHashMap<>();
+    private final Map<String, ServerSocket> agentListeners = new ConcurrentHashMap<>();
     private final AtomicInteger agentConnIds = new AtomicInteger(0);
 
     @Override
@@ -38,7 +37,6 @@ public class AgentWsListener extends WebSocketListener {
 
         String json = objectMapper.writeValueAsString(new Register("register", agentId));
         webSocket.send(json);
-        Thread.ofVirtual().start(() -> acceptLoop(8443, "example.com", 443, webSocket));
     }
 
     @Override
@@ -55,13 +53,30 @@ public class AgentWsListener extends WebSocketListener {
                 } catch (IOException e) {
                     sendTcpClose(connId, webSocket);
                 }
-
             }
             case "tcp-close" -> {
                 TcpClose close = objectMapper.readValue(text, TcpClose.class);
                 Socket socket = sockets.remove(close.getConnId());
                 if (socket != null) {
                     trySocketClose(socket);
+                }
+            }
+            case "open-listener" -> {
+                OpenListener ol = objectMapper.readValue(text, OpenListener.class);
+                if (agentListeners.containsKey(ol.getForwardId())) break;
+                try {
+                    ServerSocket server = new ServerSocket(ol.getListenPort());
+                    agentListeners.put(ol.getForwardId(), server);
+                    Thread.ofVirtual().start(() -> acceptLoop(ol, server, webSocket));
+                } catch (IOException e) {
+                    System.out.println("Cannot bind " + ol.getListenPort() + ": " + e.getMessage());
+                }
+            }
+            case "close-listener" -> {
+                CloseListener cl = objectMapper.readValue(text, CloseListener.class);
+                ServerSocket s = agentListeners.remove(cl.getForwardId());
+                if (s != null) {
+                    trySocketClose(s);
                 }
             }
             default -> System.out.println("unknown: " + text);
@@ -125,7 +140,7 @@ public class AgentWsListener extends WebSocketListener {
         webSocket.send(objectMapper.writeValueAsString(close));
     }
 
-    private void trySocketClose(Socket socket) {
+    private void trySocketClose(Closeable socket) {
         try {
             socket.close();
         } catch (IOException e) {
@@ -133,21 +148,21 @@ public class AgentWsListener extends WebSocketListener {
         }
     }
 
-    private void acceptLoop(int listenPort, String targetHost,int targetPort, WebSocket webSocket) {
-        try (ServerSocket server = new ServerSocket(listenPort)) {
+    private void acceptLoop(OpenListener ol, ServerSocket server, WebSocket webSocket) {
+        try{
             while (true) {
                 Socket client = server.accept();
                 int connId = -agentConnIds.incrementAndGet();
                 sockets.put(connId, client);
                 TcpOpen open = new TcpOpen();
                 open.setConnId(connId);
-                open.setHost(targetHost);
-                open.setPort(targetPort);
+                open.setHost(ol.getTargetHost());
+                open.setPort(ol.getTargetPort());
                 webSocket.send(objectMapper.writeValueAsString(open));
                 Thread.ofVirtual().start(() -> pumpSocketToServer(connId, client, webSocket));
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            System.out.println("Socket closed: " + e.getMessage());
         }
     }
 }
