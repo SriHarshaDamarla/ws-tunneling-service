@@ -17,6 +17,7 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jetbrains.annotations.NotNull;
@@ -26,10 +27,13 @@ import org.jetbrains.annotations.Nullable;
 public class AgentWsListener extends WebSocketListener {
 
     private final String agentId;
+    private final Runnable onConnected;
+    private final Runnable onDisconnected;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<Integer, Socket> sockets = new ConcurrentHashMap<>();
     private final Map<String, ServerSocket> agentListeners = new ConcurrentHashMap<>();
     private final AtomicInteger agentConnIds = new AtomicInteger(0);
+    private final AtomicBoolean dropped =  new AtomicBoolean(false);
 
     @Override
     public void onOpen(@NotNull WebSocket webSocket, @NotNull Response response) {
@@ -37,6 +41,7 @@ public class AgentWsListener extends WebSocketListener {
 
         String json = objectMapper.writeValueAsString(new Register("register", agentId));
         webSocket.send(json);
+        onConnected.run();
     }
 
     @Override
@@ -110,7 +115,12 @@ public class AgentWsListener extends WebSocketListener {
 
     @Override
     public void onFailure(@NotNull WebSocket webSocket, @NotNull Throwable t, @Nullable Response response) {
-        t.printStackTrace();
+        handleDrop();
+    }
+
+    @Override
+    public void onClosed(@NotNull WebSocket webSocket, int code, @NotNull String reason) {
+        handleDrop();
     }
 
     private void pumpSocketToServer(int connId, Socket socket, WebSocket webSocket) {
@@ -128,9 +138,9 @@ public class AgentWsListener extends WebSocketListener {
 
         } finally {
              if (sockets.remove(connId) != null) {
-                 sendTcpClose(connId, webSocket);
+                 trySocketClose(socket);
              }
-             trySocketClose(socket);
+             sendTcpClose(connId, webSocket);
         }
     }
 
@@ -146,6 +156,19 @@ public class AgentWsListener extends WebSocketListener {
         } catch (IOException e) {
             System.out.println("Ignoring exception on closing socket");
         }
+    }
+
+    private void handleDrop() {
+        if (!dropped.compareAndSet(false, true)) return;
+        cleanUp();
+        onDisconnected.run();
+    }
+
+    private void cleanUp() {
+        agentListeners.values().forEach(this::trySocketClose);
+        agentListeners.clear();
+        sockets.values().forEach(this::trySocketClose);
+        sockets.clear();
     }
 
     private void acceptLoop(OpenListener ol, ServerSocket server, WebSocket webSocket) {
