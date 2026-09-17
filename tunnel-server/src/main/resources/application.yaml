@@ -1,6 +1,12 @@
 spring:
   application:
     name: tunnel-server
+  datasource:
+    url: jdbc:sqlite:tunnel.db
+    driver-class-name: org.sqlite.JDBC
+  sql:
+    init:
+      mode: always
 server:
   port: 8081
 

@@ -4,8 +4,11 @@ import com.tunnel.service.dto.CreateForwardRequest;
 import com.tunnel.service.model.*;
 import com.tunnel.service.registry.AgentRegistry;
 import com.tunnel.service.registry.ConnectionRegistry;
+import com.tunnel.service.repository.ForwardRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
@@ -31,11 +34,28 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TcpForwardService {
     private final AgentRegistry registry;
     private final ConnectionRegistry connectionRegistry;
+    private final ForwardRepository repository;
     private final ObjectMapper objectMapper;
 
     private final AtomicInteger connIds = new AtomicInteger(0);
     private final Map<String, Forward> forwards = new ConcurrentHashMap<>();
     private final Map<String, ServerSocket> listeners = new ConcurrentHashMap<>();
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void reloadOnBoot() {
+        for (Forward f : repository.findAll()) {
+            forwards.put(f.getId(), f);
+            if (f.isEnabled()) {
+                try {
+                    applyEnabled(f);
+                } catch (IOException e) {
+                    log.error("could not re-establish forward {} on port {}: {}",
+                            f.getId(), f.getListenPort(), e.getMessage());
+                }
+            }
+        }
+        log.info("reloaded {} forwards from db", forwards.size());
+    }
 
     public void openTargetConnection(TcpOpen tcpOpen, String agentId) {
         try {
@@ -124,6 +144,7 @@ public class TcpForwardService {
         f.setTargetPort(request.targetPort());
         f.setEnabled(request.enabled());
         forwards.put(f.getId(), f);
+        repository.save(f);
         if (request.enabled()) applyEnabled(f);
         return f;
     }
@@ -132,6 +153,7 @@ public class TcpForwardService {
         Forward f = forwards.get(id);
         if (f == null) return;
         f.setEnabled(enabled);
+        repository.save(f);
         if (enabled) applyEnabled(f);
         else applyDisabled(f);
     }
@@ -141,6 +163,7 @@ public class TcpForwardService {
         if (f == null) return;
         applyDisabled(f);
         forwards.remove(id);
+        repository.deleteById(id);
     }
 
     public Collection<Forward> getForwards() {
