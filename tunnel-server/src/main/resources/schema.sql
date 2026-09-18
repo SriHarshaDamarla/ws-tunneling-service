@@ -1,9 +1,9 @@
 CREATE TABLE IF NOT EXISTS forward (
-    id TEXT PRIMARY KEY,
-    direction TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
+    id VARCHAR(64) PRIMARY KEY,
+    direction VARCHAR(32) NOT NULL,
+    agent_id VARCHAR(128) NOT NULL,
     listen_port INTEGER NOT NULL,
-    target_host TEXT,
+    target_host VARCHAR(255),
     target_port INTEGER,
-    enabled INTEGER NOT NULL
+    enabled BOOLEAN NOT NULL
 );

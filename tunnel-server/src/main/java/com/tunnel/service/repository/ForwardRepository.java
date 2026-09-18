@@ -27,15 +27,20 @@ public class ForwardRepository {
     };
 
     public void save(Forward f) {
-        jdbc.update("""
-                INSERT INTO forward(id, direction, agent_id, listen_port, target_host, target_port, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                direction=excluded.direction, agent_id=excluded.agent_id, listen_port=excluded.listen_port,
-                target_host=excluded.target_host, target_port=excluded.target_port, enabled=excluded.enabled
+        int rows = jdbc.update("""
+                UPDATE forward SET direction=?, agent_id=?, listen_port=?, target_host=?, target_port=?, enabled=?
+                WHERE id=?
                 """,
-                f.getId(), f.getDirection(), f.getAgentId(), f.getListenPort(),
-                f.getTargetHost(), f.getTargetPort(), f.isEnabled());
+                f.getDirection().name(), f.getAgentId(), f.getListenPort(), f.getTargetHost(), f.getTargetPort(),
+                f.isEnabled(), f.getId());
+        if (rows == 0) {
+            jdbc.update("""
+                    INSERT INTO forward (id, direction, agent_id, listen_port, target_host, target_port, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    f.getId(), f.getDirection().name(), f.getAgentId(), f.getListenPort(), f.getTargetHost(),
+                    f.getTargetPort(), f.isEnabled());
+        }
     }
 
     public void deleteById(String id) {

@@ -85,8 +85,8 @@ public class AgentWsHandler extends AbstractWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
-        log.info("Agent socket closed: {} ({})", session.getId(), status);
         String agentId = (String) session.getAttributes().get("agentId");
+        log.info("Agent socket closed: {} ({}) - {}", session.getId(), status, agentId);
         if (agentId != null) registry.remove(agentId);
     }
 
