@@ -9,12 +9,14 @@ import okio.ByteString;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -171,21 +173,134 @@ public class AgentWsListener extends WebSocketListener {
         sockets.clear();
     }
 
+    private String parseHost(byte[] head) {
+        for (String line: new String(head, StandardCharsets.US_ASCII).split("\r\n")) {
+            if (line.regionMatches(true, 0, "host:", 0, 5)) {
+                String v = line.substring(5).trim();
+                int c = v.indexOf(':');
+                return c >= 0 ? v.substring(0, c) : v;
+            }
+        }
+        return null;
+    }
+
+    private byte[] readHttpHead(InputStream in, int cap) throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream(cap);
+        int b, n = 0;
+        while ((b = in.read()) != -1) {
+            buf.write(b);
+            n++;
+            if (n >= 4 && endsWithCRLFCRLF(buf.toByteArray())) break;
+            if (n >= cap) break;
+        }
+        return buf.toByteArray();
+    }
+
+    private boolean endsWithCRLFCRLF(byte[] data) {
+        return new String(data).endsWith("\r\n\r\n");
+    }
+
+
+    private byte[] readN(InputStream in, int n) throws IOException {
+        byte[] buf = new byte[n];
+        int off = 0;
+        while (off < n) {
+            int r = in.read(buf, off, n - off);
+            if (r == -1) return null;
+            off += r;
+        }
+        return buf;
+    }
+
+    // Section taken from AI and, it just works STARTS
+    // read the whole first TLS record (the ClientHello). returns the raw bytes to forward, or null.
+    private byte[] readTlsClientHello(InputStream in) throws IOException {
+        byte[] header = readN(in, 5);
+        if (header == null || (header[0] & 0xFF) != 0x16) return null;   // not a TLS handshake
+        int recordLen = ((header[3] & 0xFF) << 8) | (header[4] & 0xFF);
+        if (recordLen <= 0 || recordLen > 16384) return null;           // TLS record max
+        byte[] body = readN(in, recordLen);
+        if (body == null) return null;
+        byte[] full = new byte[5 + recordLen];
+        System.arraycopy(header, 0, full, 0, 5);
+        System.arraycopy(body, 0, full, 5, recordLen);
+        return full;                                                     // parse AND forward these
+    }
+
+    private int u16(byte[] b, int i) { return ((b[i] & 0xFF) << 8) | (b[i + 1] & 0xFF); }
+
+    // walk the ClientHello to the SNI hostname. fail-safe: any malformed input → null.
+    private String parseSni(byte[] rec) {
+        try {
+            int pos = 5;                                   // skip record header
+            if ((rec[pos] & 0xFF) != 0x01) return null;    // must be ClientHello
+            pos += 4;                                      // handshake type(1)+len(3)
+            pos += 2 + 32;                                 // client_version + random
+            pos += 1 + (rec[pos] & 0xFF);                  // session_id
+            pos += 2 + u16(rec, pos);                      // cipher_suites
+            pos += 1 + (rec[pos] & 0xFF);                  // compression_methods
+            int extEnd = pos + 2 + u16(rec, pos);          // extensions block end
+            pos += 2;
+            while (pos + 4 <= extEnd) {
+                int type = u16(rec, pos);
+                int len  = u16(rec, pos + 2);
+                pos += 4;
+                if (type == 0x0000) {                      // server_name extension
+                    int p = pos + 2;                       // skip server_name_list length
+                    int nameType = rec[p] & 0xFF; p += 1;
+                    int nameLen  = u16(rec, p);   p += 2;
+                    if (nameType == 0x00) return new String(rec, p, nameLen, StandardCharsets.US_ASCII);
+                }
+                pos += len;
+            }
+        } catch (Exception ignored) { }                    // any bounds issue → treat as no SNI
+        return null;
+    }
+    // Section taken from AI and, it just works ENDS
+
     private void acceptLoop(OpenListener ol, ServerSocket server, WebSocket webSocket) {
         try{
             while (true) {
                 Socket client = server.accept();
+                byte[] peeked = null;
+                String host = switch (ol.getMode()) {
+                    case HTTP -> {
+                        peeked = readHttpHead(client.getInputStream(), 8192);
+                        yield parseHost(peeked);
+                    }
+                    case TLS -> {
+                        peeked = readTlsClientHello(client.getInputStream());
+                        yield (peeked == null) ? null : parseSni(peeked);
+                    }
+                    default -> ol.getTargetHost();
+                };
+                if (ol.getMode() != ForwardMode.TCP && host == null) {
+                    trySocketClose(client);
+                    continue;
+                }
+
                 int connId = -agentConnIds.incrementAndGet();
                 sockets.put(connId, client);
+
                 TcpOpen open = new TcpOpen();
                 open.setConnId(connId);
-                open.setHost(ol.getTargetHost());
+                open.setHost(host);
                 open.setPort(ol.getTargetPort());
+
                 webSocket.send(objectMapper.writeValueAsString(open));
+                if (peeked != null) sendFrame(connId, peeked, webSocket);
                 Thread.ofVirtual().start(() -> pumpSocketToServer(connId, client, webSocket));
             }
         } catch (IOException e) {
             System.out.println("Socket closed: " + e.getMessage());
         }
+    }
+
+    private void sendFrame(int connId, byte[] data, WebSocket webSocket) {
+        ByteBuffer buf = ByteBuffer.allocate(4 + data.length);
+        buf.putInt(connId);
+        buf.put(data);
+        buf.flip();
+        webSocket.send(ByteString.of(buf.array()));
     }
 }

@@ -11,4 +11,5 @@ public class Forward {
     private String targetHost;
     private int targetPort;
     private boolean enabled;
+    private ForwardMode mode;
 }

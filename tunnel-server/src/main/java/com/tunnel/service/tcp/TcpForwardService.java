@@ -143,6 +143,7 @@ public class TcpForwardService {
         f.setTargetHost(request.targetHost());
         f.setTargetPort(request.targetPort());
         f.setEnabled(request.enabled());
+        f.setMode(request.mode());
         forwards.put(f.getId(), f);
         repository.save(f);
         if (request.enabled()) applyEnabled(f);
@@ -206,6 +207,7 @@ public class TcpForwardService {
             ol.setListenPort(f.getListenPort());
             ol.setTargetHost(f.getTargetHost());
             ol.setTargetPort(f.getTargetPort());
+            ol.setMode(f.getMode());
             trySend(s, ol);
         });
     }

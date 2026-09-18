@@ -5,5 +5,6 @@ CREATE TABLE IF NOT EXISTS forward (
     listen_port INTEGER NOT NULL,
     target_host VARCHAR(255),
     target_port INTEGER,
-    enabled BOOLEAN NOT NULL
+    enabled BOOLEAN NOT NULL,
+    mode VARCHAR(32) NOT NULL
 );

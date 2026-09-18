@@ -2,6 +2,7 @@ package com.tunnel.service.repository;
 
 import com.tunnel.service.model.Direction;
 import com.tunnel.service.model.Forward;
+import com.tunnel.service.model.ForwardMode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -23,23 +24,26 @@ public class ForwardRepository {
         f.setTargetHost(rs.getString("target_host"));
         f.setTargetPort(rs.getInt("target_port"));
         f.setEnabled(rs.getBoolean("enabled"));
+        f.setMode(ForwardMode.valueOf(rs.getString("mode")));
         return f;
     };
 
     public void save(Forward f) {
         int rows = jdbc.update("""
-                UPDATE forward SET direction=?, agent_id=?, listen_port=?, target_host=?, target_port=?, enabled=?
+                UPDATE forward SET direction=?, agent_id=?, listen_port=?, target_host=?, target_port=?, 
+                enabled=?, mode=?
                 WHERE id=?
                 """,
                 f.getDirection().name(), f.getAgentId(), f.getListenPort(), f.getTargetHost(), f.getTargetPort(),
-                f.isEnabled(), f.getId());
+                f.isEnabled(), f.getMode().name(), f.getId());
         if (rows == 0) {
             jdbc.update("""
-                    INSERT INTO forward (id, direction, agent_id, listen_port, target_host, target_port, enabled)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO forward (id, direction, agent_id, listen_port, target_host, target_port, 
+                    enabled, mode)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     f.getId(), f.getDirection().name(), f.getAgentId(), f.getListenPort(), f.getTargetHost(),
-                    f.getTargetPort(), f.isEnabled());
+                    f.getTargetPort(), f.isEnabled(), f.getMode().name());
         }
     }
 

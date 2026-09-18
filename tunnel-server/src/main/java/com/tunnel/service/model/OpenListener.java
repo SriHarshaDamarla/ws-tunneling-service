@@ -9,4 +9,5 @@ public class OpenListener {
     private int listenPort;
     private String targetHost;
     private int targetPort;
+    private ForwardMode mode;
 }
