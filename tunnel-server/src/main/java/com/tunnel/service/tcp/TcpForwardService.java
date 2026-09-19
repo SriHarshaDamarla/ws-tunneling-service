@@ -60,6 +60,9 @@ public class TcpForwardService {
     public void openTargetConnection(TcpOpen tcpOpen, String agentId) {
         try {
             Socket target = new Socket(tcpOpen.getHost(), tcpOpen.getPort());
+            target.setTcpNoDelay(true);
+            target.setSendBufferSize(1024 * 1024);
+            target.setReceiveBufferSize(1024 * 1024);
             connectionRegistry.register(tcpOpen.getConnId(), target);
             Thread.ofVirtual().start(() -> pumpSocketToAgent(tcpOpen.getConnId(), target, agentId));
         } catch (IOException e) {
@@ -88,6 +91,9 @@ public class TcpForwardService {
         try {
             while (true) {
                 Socket client = server.accept();
+                client.setTcpNoDelay(true);
+                client.setSendBufferSize(1024 * 1024);
+                client.setReceiveBufferSize(1024 * 1024);
                 Optional<WebSocketSession> sessionOpt = registry.get(f.getAgentId());
                 if (sessionOpt.isEmpty()) {
                     trySocketClose(client);
@@ -110,10 +116,10 @@ public class TcpForwardService {
     }
 
     private void pumpSocketToAgent(int connId, Socket client, String agentId) {
-        try(InputStream in = client.getInputStream()) {
-            byte[] buffer = new byte[1024];
+        WebSocketSession session = registry.get(agentId).orElseThrow();
+        try (InputStream in = client.getInputStream()) {
+            byte[] buffer = new byte[16 * 1024];
             int len;
-            WebSocketSession session = registry.get(agentId).orElseThrow();
             while ((len = in.read(buffer)) != -1) {
                 ByteBuffer buf = ByteBuffer.allocate(4 + len);
                 buf.putInt(connId);
@@ -122,16 +128,14 @@ public class TcpForwardService {
                 session.sendMessage(new BinaryMessage(buf));
             }
             sendTcpClose(connId, agentId);
-
         } catch (IOException e) {
 
         } finally {
             if (connectionRegistry.remove(connId) != null) {
                 sendTcpClose(connId, agentId);
             }
-           trySocketClose(client);
+            trySocketClose(client);
         }
-
     }
 
     public Forward createForward(CreateForwardRequest request) throws IOException {

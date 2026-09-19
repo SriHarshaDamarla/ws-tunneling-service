@@ -5,6 +5,7 @@ import com.tunnel.service.model.TcpOpen;
 import com.tunnel.service.registry.AgentRegistry;
 import com.tunnel.service.registry.ConnectionRegistry;
 import com.tunnel.service.tcp.TcpForwardService;
+import com.tunnel.service.util.BlockingWebSocketSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -13,7 +14,6 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
-import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -43,8 +43,7 @@ public class AgentWsHandler extends AbstractWebSocketHandler {
         switch (type) {
             case "register" -> {
                 String agentId = node.get("agentId").asString();
-                WebSocketSession concurrent = new ConcurrentWebSocketSessionDecorator(session, 10_000, 512 * 1024);
-                registry.register(agentId, concurrent);
+                registry.register(agentId, new BlockingWebSocketSession(session));
                 session.getAttributes().put("agentId", agentId);
                 tcpForwardService.onAgentRegistered(agentId);
                 log.info("Registered agent: {}", agentId);

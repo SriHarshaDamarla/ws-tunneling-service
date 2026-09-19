@@ -6,6 +6,8 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -21,9 +23,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 @RequiredArgsConstructor
 public class AgentWsListener extends WebSocketListener {
@@ -55,6 +54,9 @@ public class AgentWsListener extends WebSocketListener {
                 int connId = open.getConnId();
                 try {
                     Socket socket = new Socket(open.getHost(), open.getPort());
+                    socket.setTcpNoDelay(true);
+                    socket.setSendBufferSize(1024 * 1024);
+                    socket.setReceiveBufferSize(1024 * 1024);
                     sockets.put(connId, socket);
                     Thread.ofVirtual().start(() -> pumpSocketToServer(connId, socket, webSocket));
                 } catch (IOException e) {
@@ -127,7 +129,7 @@ public class AgentWsListener extends WebSocketListener {
 
     private void pumpSocketToServer(int connId, Socket socket, WebSocket webSocket) {
         try (InputStream in = socket.getInputStream()) {
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[16 * 1024];
             int len;
             while ((len = in.read(buffer)) != -1) {
                 ByteBuffer buf = ByteBuffer.allocate(4 + len);
@@ -139,10 +141,10 @@ public class AgentWsListener extends WebSocketListener {
         } catch (IOException e) {
 
         } finally {
-             if (sockets.remove(connId) != null) {
-                 trySocketClose(socket);
-             }
-             sendTcpClose(connId, webSocket);
+            if (sockets.remove(connId) != null) {
+                trySocketClose(socket);
+            }
+            sendTcpClose(connId, webSocket);
         }
     }
 
@@ -262,6 +264,9 @@ public class AgentWsListener extends WebSocketListener {
         try{
             while (true) {
                 Socket client = server.accept();
+                client.setTcpNoDelay(true);
+                client.setSendBufferSize(1024 * 1024);
+                client.setReceiveBufferSize(1024 * 1024);
                 byte[] peeked = null;
                 String host = switch (ol.getMode()) {
                     case HTTP -> {

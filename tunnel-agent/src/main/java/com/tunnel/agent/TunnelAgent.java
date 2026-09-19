@@ -14,6 +14,7 @@ public class TunnelAgent {
     private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private static final OkHttpClient client = new OkHttpClient.Builder()
             .pingInterval(Duration.ofSeconds(20))
+            .socketFactory(new NoDelaySocketFactory())   // TCP_NODELAY on the WS transport (kills Nagle on the LAN hop)
             .build();
     private static final AtomicInteger backOff = new AtomicInteger(1);
     private static String wsUrl, agentId;
